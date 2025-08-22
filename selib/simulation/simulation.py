@@ -1169,25 +1169,38 @@ class DiscreteEventModel:
                 next_connection = None  # fall back on any error
         
         # 2) Fallback: original weighted connections
+
         if next_connection is None and len(self.network[node_name]['connections']) > 0:
             keys = list(self.network[node_name]['connections'].keys())
             weights = []
-            for nxt in keys:
-                wexpr = str(self.network[node_name]['connections'][nxt])
+        
+            def _is_number(s: str) -> bool:
                 try:
-                    w = float(eval(wexpr, {"np": np, "random": random}))
+                    float(s); return True
+                except Exception:
+                    return False
+        
+            for nxt in keys:
+                wval = self.network[node_name]['connections'][nxt]
+                try:
+                    if isinstance(wval, (int, float)):
+                        w = float(wval)
+                    else:
+                        wexpr = str(wval).strip()
+                        w = float(wexpr) if _is_number(wexpr) else float(eval(wexpr, {"np": np, "random": random}))
                     if not np.isfinite(w) or w < 0:
                         w = 0.0
                 except BaseException as e:
                     self.network[node_name].setdefault("errors", []).append(
-                        {"where": "connection_weight", "node": node_name, "to": nxt, "expr": wexpr, "error": repr(e)}
+                        {"where": "connection_weight", "node": node_name, "to": nxt,
+                         "expr": str(wval), "error": repr(e)}
                     )
                     w = 0.0
                 weights.append(w)
-            # If all weights are zero, do nothing (entity stops here)
+        
             if any(w > 0 for w in weights):
-                import random
-                next_connection = random.choices(keys, weights=weights, k=1)[0]      
+                next_connection = random.choices(keys, weights=weights, k=1)[0]
+     
         
         # 3) Go there
         if next_connection is not None:
