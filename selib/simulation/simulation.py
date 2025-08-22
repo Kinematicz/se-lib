@@ -1426,7 +1426,7 @@ def init_de_model():
     model_type = "discrete"
     return de_model
 
-    def add_server(name, connections, service_time, capacity=1, router=None): #new
+def add_server(name, connections, service_time, capacity=1, router=None): #new
     """
     Add a server to a discrete event model.
 
