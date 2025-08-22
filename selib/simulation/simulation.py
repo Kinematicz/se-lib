@@ -1097,12 +1097,19 @@ class DiscreteEventModel:
                 # Collect service times
                 self.network[node_name]['service_times'].append(service_time)
                 self.entity_data[entity_num]['nodes'].append((node_name, self.env.now))
+                
+                # Update busy time and utilization (robust to t=0 and bad capacity)
                 self.network[node_name]['resource_busy_time'] += service_time
-                self.network[node_name]['resource_utilization'] = (
-                    self.network[node_name]['resource_busy_time'] /
-                    self.env.now /
-                    self.network[node_name]['capacity']
-                )
+                
+                elapsed = self.env.now
+                cap = self.network[node_name].get('capacity', 1) or 1  # avoid divide-by-zero
+                
+                if elapsed > 0:
+                    util = self.network[node_name]['resource_busy_time'] / (elapsed * cap)
+                else:
+                    util = 0.0  # at t=0, define utilization as 0 to allow zero-time servers
+                
+                self.network[node_name]['resource_utilization'] = util
                 if self.run_specs.get('verbose', False):
                     print(f"{self.env.now}: {entity_name} {entity_num} completed using {node_name} resource with service time {service_time}")
 
