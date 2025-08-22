@@ -1072,8 +1072,15 @@ class DiscreteEventModel:
         """
         # Process resource usage
         if self.network[node_name]['type'] == 'delay':
-            delay_time = eval(self.network[node_name]['delay_time'])
-            yield self.env.timeout(delay_time)
+            dex = self.network[node_name]['delay_time']
+            try:
+                delay_time = float(eval(dex, {"np": np, "random": random}))
+            except BaseException as e:
+                self.network[node_name].setdefault("errors", []).append(
+                    {"where": "delay_time", "node": node_name, "expr": dex, "error": repr(e)}
+                )
+                delay_time = 0.0
+                        yield self.env.timeout(delay_time)
             self.network[node_name]['delay_times'].append(delay_time)
             if self.run_specs.get('verbose', False):
                 print(f"{self.env.now}: {entity_name} {entity_num} delayed {delay_time} at {node_name}")
@@ -1093,14 +1100,13 @@ class DiscreteEventModel:
                     print(f"{self.env.now}: {entity_name} {entity_num} granted {node_name} resource waiting time {waiting_time}")
                 expr = self.network[node_name]['service_time']
                 try:
-                    # Evaluate with a safe namespace and coerce to float
                     service_time = float(eval(expr, {"np": np, "random": random}))
-                except ZeroDivisionError:
-                    # If the expression itself divides by zero, treat as zero-time service
+                except BaseException as e:
+                    # Log and fall back to zero-time service
+                    self.network[node_name].setdefault("errors", []).append(
+                        {"where": "service_time", "node": node_name, "expr": expr, "error": repr(e)}
+                    )
                     service_time = 0.0
-                except Exception as e:
-                    # Surface a clear error so you know which node/expression failed
-                    raise RuntimeError(f"Failed to eval service_time on node '{node_name}' with expr={expr!r}: {e}")
                 yield self.env.timeout(service_time)
 
                 # Collect service times
@@ -1144,13 +1150,27 @@ class DiscreteEventModel:
                 next_connection = None  # fall back on any error
         
         # 2) Fallback: original weighted connections
+        Replace the weight eval loop with a guarded version:
+
         if next_connection is None and len(self.network[node_name]['connections']) > 0:
-            weight_list = []
-            for nxt in self.network[node_name]['connections'].keys():
-                weight_list.append(eval(str(self.network[node_name]['connections'][nxt])))
-            weights = tuple(weight_list)
-            import random
-            next_connection = random.choices(list(self.network[node_name]['connections'].keys()), weights, k=1)[0]
+            keys = list(self.network[node_name]['connections'].keys())
+            weights = []
+            for nxt in keys:
+                wexpr = str(self.network[node_name]['connections'][nxt])
+                try:
+                    w = float(eval(wexpr, {"np": np, "random": random}))
+                    if not np.isfinite(w) or w < 0:
+                        w = 0.0
+                except BaseException as e:
+                    self.network[node_name].setdefault("errors", []).append(
+                        {"where": "connection_weight", "node": node_name, "to": nxt, "expr": wexpr, "error": repr(e)}
+                    )
+                    w = 0.0
+                weights.append(w)
+            # If all weights are zero, do nothing (entity stops here)
+            if any(w > 0 for w in weights):
+                import random
+                next_connection = random.choices(keys, weights=weights, k=1)[0]      
         
         # 3) Go there
         if next_connection is not None:
@@ -1181,7 +1201,15 @@ class DiscreteEventModel:
                 source_name = key
                 arrival_time = 0
                 for entity_num in range(self.network[source_name]['num_entities']):
-                    arrival_time += eval(self.network[source_name]['interarrival_time'])
+                    iex = self.network[source_name]['interarrival_time']
+                    try:
+                        ia = float(eval(iex, {"np": np, "random": random}))
+                    except BaseException as e:
+                        self.network[source_name].setdefault("errors", []).append(
+                            {"where": "interarrival_time", "node": source_name, "expr": iex, "error": repr(e)}
+                        )
+                        ia = 0.0
+                    arrival_time += ia
                     self.network[source_name]['arrivals'].append(arrival_time)
                     entity_num += 1
 
