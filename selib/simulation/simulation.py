@@ -1170,15 +1170,11 @@ class DiscreteEventModel:
         
         # 2) Fallback: original weighted connections
 
-        if next_connection is None and len(self.network[node_name]['connections']) > 0:
-            keys = list(self.network[node_name]['connections'].keys())
+        if next_connection is None and self.network[node_name]['connections']:
+            keys = list(self.network[node_name]['connections'])
             weights = []
         
-            def _is_number(s: str) -> bool:
-                try:
-                    float(s); return True
-                except Exception:
-                    return False
+            randmod = __import__("random")  # safe reference, not a local assignment
         
             for nxt in keys:
                 wval = self.network[node_name]['connections'][nxt]
@@ -1187,10 +1183,13 @@ class DiscreteEventModel:
                         w = float(wval)
                     else:
                         wexpr = str(wval).strip()
-                        w = float(wexpr) if _is_number(wexpr) else float(eval(wexpr, {"np": np, "random": random}))
+                        try:
+                            w = float(wexpr)  # numeric string like "1.0"
+                        except Exception:
+                            w = float(eval(wexpr, {"np": np, "random": randmod}))
                     if not np.isfinite(w) or w < 0:
                         w = 0.0
-                except BaseException as e:
+                except Exception as e:
                     self.network[node_name].setdefault("errors", []).append(
                         {"where": "connection_weight", "node": node_name, "to": nxt,
                          "expr": str(wval), "error": repr(e)}
@@ -1199,7 +1198,8 @@ class DiscreteEventModel:
                 weights.append(w)
         
             if any(w > 0 for w in weights):
-                next_connection = random.choices(keys, weights=weights, k=1)[0]
+                next_connection = randmod.choices(keys, weights=weights, k=1)[0]
+
      
         
         # 3) Go there
