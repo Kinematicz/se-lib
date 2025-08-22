@@ -1080,7 +1080,7 @@ class DiscreteEventModel:
                     {"where": "delay_time", "node": node_name, "expr": dex, "error": repr(e)}
                 )
                 delay_time = 0.0
-                        yield self.env.timeout(delay_time)
+            yield self.env.timeout(delay_time)
             self.network[node_name]['delay_times'].append(delay_time)
             if self.run_specs.get('verbose', False):
                 print(f"{self.env.now}: {entity_name} {entity_num} delayed {delay_time} at {node_name}")
@@ -1150,8 +1150,6 @@ class DiscreteEventModel:
                 next_connection = None  # fall back on any error
         
         # 2) Fallback: original weighted connections
-        Replace the weight eval loop with a guarded version:
-
         if next_connection is None and len(self.network[node_name]['connections']) > 0:
             keys = list(self.network[node_name]['connections'].keys())
             weights = []
