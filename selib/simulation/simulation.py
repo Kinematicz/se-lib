@@ -932,7 +932,7 @@ class DiscreteEventModel:
         # Create simulation environment
         self.env = simpy.Environment()
 
-    def add_server(self, name, connections, service_time, capacity=1) -> None:
+    def add_server(self, name, connections, service_time, capacity=1, router=None) -> None: #new
         """
         Add a server to the discrete event model.
 
@@ -958,6 +958,7 @@ class DiscreteEventModel:
             'capacity': capacity,
             'resource_busy_time': 0,
             'resource_utilization': 0
+            'router': router,   # new
         }
 
     def add_delay(self, name, connections, delay_time) -> None:
@@ -981,7 +982,7 @@ class DiscreteEventModel:
             'delay_times': [],
         }
 
-    def add_source(self, name, entity_name, num_entities, connections, interarrival_time) -> None:
+    def add_source(self, name, entity_name, num_entities, connections, interarrival_time, init_entity=None) -> None: #new
         """
         Add a source node to the discrete event model to generate entities.
 
@@ -1007,6 +1008,7 @@ class DiscreteEventModel:
             'connections': connections,
             'interarrival_time': interarrival_time,
             'arrivals': []
+            'init_entity': init_entity, #new
         }
         self.run_specs[name] = {}
         self.run_specs[name]['interarrival_time'] = interarrival_time
@@ -1044,6 +1046,13 @@ class DiscreteEventModel:
             Name of the entity type
         """
         yield self.env.timeout(arrival_time)
+        self.entity_data.setdefault(entity_num, {}).setdefault('attrs', {}) #new
+        self.entity_data.setdefault(entity_num, {}).setdefault('events', []) #new
+
+        init = self.network.get(node_name, {}).get('init_entity')#new
+        if callable(init): #new
+            init(entity_num, self.entity_data)
+    
         if self.run_specs.get('verbose', False):
             print(f"{self.env.now}: {entity_name} {entity_num} entered from {node_name}")
         self.env.process(self._process_node(node_name, entity_num, entity_name))
@@ -1104,18 +1113,36 @@ class DiscreteEventModel:
             self.entity_data[entity_num]['departure'] = self.env.now
 
         # Process arrivals and connections
-        if len(self.network[node_name]['connections']) > 0:
-            import random
-
+        #new below this line-------------------------------------------------
+        # --- Decide the next node ---
+        next_connection = None
+        
+        # 1) Try a state-aware router first (if provided on this node)
+        router_cb = self.network[node_name].get('router')
+        if callable(router_cb):
+            try:
+                proposed = router_cb(entity_num, node_name, self.network, self.entity_data)
+                if isinstance(proposed, str):
+                    next_connection = proposed
+            except Exception:
+                next_connection = None  # fall back on any error
+        
+        # 2) Fallback: original weighted connections
+        if next_connection is None and len(self.network[node_name]['connections']) > 0:
             weight_list = []
-            for next_node in self.network[node_name]['connections'].keys():
-                weight_list.append(eval(str(self.network[node_name]['connections'][next_node])))
+            for nxt in self.network[node_name]['connections'].keys():
+                weight_list.append(eval(str(self.network[node_name]['connections'][nxt])))
             weights = tuple(weight_list)
-
-            connection = random.choices(list(self.network[node_name]['connections'].keys()), weights, k=1)[0]
+            import random
+            next_connection = random.choices(list(self.network[node_name]['connections'].keys()), weights, k=1)[0]
+        
+        # 3) Go there
+        if next_connection is not None:
             if self.run_specs.get('verbose', False):
-                print(f"{self.env.now}: {entity_name} {entity_num} {node_name} -> {connection}")
-            self.env.process(self._process_node(connection, entity_num, entity_name))
+                print(f"{self.env.now}: {entity_name} {entity_num} {node_name} -> {next_connection}")
+            self.env.process(self._process_node(next_connection, entity_num, entity_name))
+        #new above this line------------------------------------------------------
+
 
     def run_model(self, verbose=True) -> tuple:
         """
@@ -1142,7 +1169,7 @@ class DiscreteEventModel:
                     self.network[source_name]['arrivals'].append(arrival_time)
                     entity_num += 1
 
-                    self.entity_data[entity_num] = {'arrival': arrival_time, 'nodes': [], 'departure': None}
+                    self.entity_data[entity_num] = {'arrival': arrival_time, 'nodes': [], 'departure': None, 'attrs': {}, 'events': []}
                     self.env.process(
                         self._process_initial_arrival(
                             arrival_time,
@@ -1399,7 +1426,7 @@ def init_de_model():
     model_type = "discrete"
     return de_model
 
-def add_server(name, connections, service_time, capacity=1):
+    def add_server(name, connections, service_time, capacity=1, router=None): #new
     """
     Add a server to a discrete event model.
 
@@ -1414,7 +1441,7 @@ def add_server(name, connections, service_time, capacity=1):
     capacity: int, optional
         The number of resource usage slots in the server, by default 1
     """
-    de_model.add_server(name, connections, service_time, capacity)
+    de_model.add_server(name, connections, service_time, capacity, router) #new
 
 def add_delay(name, connections, delay_time):
     """
@@ -1431,7 +1458,7 @@ def add_delay(name, connections, delay_time):
     """
     de_model.add_delay(name, connections, delay_time)
 
-def add_source(name, entity_name, num_entities, connections, interarrival_time):
+def add_source(name, entity_name, num_entities, connections, interarrival_time, init_entity=None): #new
     """
     Add a source node to a discrete event model to generate entities.
 
@@ -1448,7 +1475,7 @@ def add_source(name, entity_name, num_entities, connections, interarrival_time):
     interarrival_time: str
         The time between entity arrivals into the system.
     """
-    de_model.add_source(name, entity_name, num_entities, connections, interarrival_time)
+    de_model.add_source(name, entity_name, num_entities, connections, interarrival_time, init_entity)
 
 def add_terminate(name):
     """
