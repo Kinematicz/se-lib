@@ -957,7 +957,7 @@ class DiscreteEventModel:
             'service_times': [],
             'capacity': capacity,
             'resource_busy_time': 0,
-            'resource_utilization': 0
+            'resource_utilization': 0,
             'router': router,   # new
         }
 
@@ -1007,7 +1007,7 @@ class DiscreteEventModel:
             'num_entities': num_entities,
             'connections': connections,
             'interarrival_time': interarrival_time,
-            'arrivals': []
+            'arrivals': [],
             'init_entity': init_entity, #new
         }
         self.run_specs[name] = {}
