@@ -1091,7 +1091,16 @@ class DiscreteEventModel:
                 self.network[node_name]['waiting_times'].append(waiting_time)
                 if self.run_specs.get('verbose', False):
                     print(f"{self.env.now}: {entity_name} {entity_num} granted {node_name} resource waiting time {waiting_time}")
-                service_time = eval(self.network[node_name]['service_time'])
+                expr = self.network[node_name]['service_time']
+                try:
+                    # Evaluate with a safe namespace and coerce to float
+                    service_time = float(eval(expr, {"np": np, "random": random}))
+                except ZeroDivisionError:
+                    # If the expression itself divides by zero, treat as zero-time service
+                    service_time = 0.0
+                except Exception as e:
+                    # Surface a clear error so you know which node/expression failed
+                    raise RuntimeError(f"Failed to eval service_time on node '{node_name}' with expr={expr!r}: {e}")
                 yield self.env.timeout(service_time)
 
                 # Collect service times
