@@ -1168,25 +1168,19 @@ class DiscreteEventModel:
             except Exception:
                 next_connection = None  # fall back on any error
         
-        # 2) Fallback: original weighted connections
-
+        # 2) Fallback: weighted connections without eval (no local 'random' issues)
         if next_connection is None and self.network[node_name]['connections']:
             keys = list(self.network[node_name]['connections'])
             weights = []
-        
-            randmod = __import__("random")  # safe reference, not a local assignment
-        
             for nxt in keys:
                 wval = self.network[node_name]['connections'][nxt]
                 try:
+                    # accept ints/floats or numeric strings like "1.0"
                     if isinstance(wval, (int, float)):
                         w = float(wval)
                     else:
-                        wexpr = str(wval).strip()
-                        try:
-                            w = float(wexpr)  # numeric string like "1.0"
-                        except Exception:
-                            w = float(eval(wexpr, {"np": np, "random": randmod}))
+                        w = float(str(wval).strip())
+                    # sanitize
                     if not np.isfinite(w) or w < 0:
                         w = 0.0
                 except Exception as e:
@@ -1197,10 +1191,11 @@ class DiscreteEventModel:
                     w = 0.0
                 weights.append(w)
         
+            # if all weights are zero, stop here; otherwise choose
             if any(w > 0 for w in weights):
-                next_connection = randmod.choices(keys, weights=weights, k=1)[0]
+                next_connection = random.choices(keys, weights=weights, k=1)[0]
 
-     
+
         
         # 3) Go there
         if next_connection is not None:
