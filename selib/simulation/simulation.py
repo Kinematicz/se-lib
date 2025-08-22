@@ -1086,47 +1086,66 @@ class DiscreteEventModel:
                 print(f"{self.env.now}: {entity_name} {entity_num} delayed {delay_time} at {node_name}")
             self.entity_data[entity_num]['nodes'].append((node_name, self.env.now))
 
-        if self.network[node_name]['type'] == 'server':
+        elif self.network[node_name]['type'] == 'server':
             with self.network[node_name]['resource'].request() as req:
                 if self.run_specs.get('verbose', False):
                     print(f"{self.env.now}: {entity_name} {entity_num} requesting {node_name} resource ")
                 this_arrival_time = self.env.now
                 yield req
 
-                waiting_time = self.env.now - this_arrival_time
-                # Collect waiting times
-                self.network[node_name]['waiting_times'].append(waiting_time)
-                if self.run_specs.get('verbose', False):
-                    print(f"{self.env.now}: {entity_name} {entity_num} granted {node_name} resource waiting time {waiting_time}")
-                expr = self.network[node_name]['service_time']
+                # ---- everything after yield req is guarded ----
                 try:
-                    service_time = float(eval(expr, {"np": np, "random": random}))
-                except BaseException as e:
-                    # Log and fall back to zero-time service
-                    self.network[node_name].setdefault("errors", []).append(
-                        {"where": "service_time", "node": node_name, "expr": expr, "error": repr(e)}
-                    )
-                    service_time = 0.0
-                yield self.env.timeout(service_time)
+                    # waiting-time bookkeeping
+                    waiting_time = self.env.now - this_arrival_time
+                    self.network[node_name]['waiting_times'].append(waiting_time)
+                    if self.run_specs.get('verbose', False):
+                        print(f"{self.env.now}: {entity_name} {entity_num} granted {node_name} resource waiting time {waiting_time}")
 
-                # Collect service times
-                self.network[node_name]['service_times'].append(service_time)
-                self.entity_data[entity_num]['nodes'].append((node_name, self.env.now))
-                
-                # Update busy time and utilization (robust to t=0 and bad capacity)
-                self.network[node_name]['resource_busy_time'] += service_time
-                
-                elapsed = self.env.now
-                cap = self.network[node_name].get('capacity', 1) or 1  # avoid divide-by-zero
-                
-                if elapsed > 0:
-                    util = self.network[node_name]['resource_busy_time'] / (elapsed * cap)
-                else:
-                    util = 0.0  # at t=0, define utilization as 0 to allow zero-time servers
-                
-                self.network[node_name]['resource_utilization'] = util
-                if self.run_specs.get('verbose', False):
-                    print(f"{self.env.now}: {entity_name} {entity_num} completed using {node_name} resource with service time {service_time}")
+                    # evaluate service_time with a constant fast-path
+                    raw = self.network[node_name]['service_time']
+                    if isinstance(raw, (int, float)):
+                        service_time = float(raw)
+                    else:
+                        expr = str(raw).strip()
+                        if expr.replace('.', '', 1).isdigit():              # "0" or "1.25"
+                            service_time = float(expr)
+                        else:
+                            service_time = float(eval(expr, {"np": np, "random": random}))
+
+                    # do the service
+                    yield self.env.timeout(service_time)
+
+                    # bookkeeping
+                    self.network[node_name]['service_times'].append(service_time)
+                    self.entity_data[entity_num]['nodes'].append((node_name, self.env.now))
+
+                    # utilization (robust to t=0 and bad capacity)
+                    self.network[node_name]['resource_busy_time'] += service_time
+                    elapsed = self.env.now
+                    cap = self.network[node_name].get('capacity', 1) or 1
+                    util = (self.network[node_name]['resource_busy_time'] / (elapsed * cap)) if elapsed > 0 else 0.0
+                    self.network[node_name]['resource_utilization'] = util
+
+                    if self.run_specs.get('verbose', False):
+                        print(f"{self.env.now}: {entity_name} {entity_num} completed using {node_name} resource with service time {service_time}")
+
+                except ZeroDivisionError as e:
+                    # Catch any divide-by-zero that slips through (e.g., inside a sampler)
+                    self.network[node_name].setdefault("errors", []).append(
+                        {"where": "server_block", "node": node_name, "env_now": self.env.now,
+                         "cap": self.network[node_name].get('capacity', 1), "error": repr(e)}
+                    )
+                    # safe defaults so the sim keeps going
+                    self.network[node_name]['resource_utilization'] = 0.0
+                except BaseException as e:
+                    # Log other eval/runtime issues and keep going with zero-time
+                    self.network[node_name].setdefault("errors", []).append(
+                        {"where": "service_time", "node": node_name, "expr": str(self.network[node_name]['service_time']), "error": repr(e)}
+                    )
+                    # treat as zero-time service and continue
+                    # (no extra yield; we already returned from timeout on the failing path)
+                    pass
+
 
         if self.network[node_name]['type'] == 'terminate':
             if self.run_specs.get('verbose', False):
